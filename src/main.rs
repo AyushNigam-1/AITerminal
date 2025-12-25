@@ -2,8 +2,13 @@ use colored::*;
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
-mod groq;
+mod command_policy;
+mod groq; // 👈 THIS WAS MISSING
+mod utils;
 use groq::{GroqClient, Message};
+// mod command_policy;
+use command_policy::{CommandResult, CommandRisk, classify_command};
+use utils::confirm_yes;
 
 #[tokio::main]
 async fn main() {
@@ -84,19 +89,42 @@ fn handle_ai_reply(reply: &str) {
         println!("{} {}", "AI:".bold().green(), text.trim());
     } else if let Some(cmd) = reply.strip_prefix("CMD:") {
         let cmd = cmd.trim();
+        let risk = classify_command(cmd);
 
         println!("{} {}", "Proposed command:".bold().yellow(), cmd.cyan());
 
-        print!("{}", "Do you want to execute this command? (y/n): ".bold());
-        io::stdout().flush().unwrap();
+        match risk {
+            CommandRisk::Safe => {
+                if confirm_yes("Execute this command? (y/n): ") {
+                    execute_command(cmd);
+                }
+            }
 
-        let mut confirm = String::new();
-        io::stdin().read_line(&mut confirm).unwrap();
+            CommandRisk::Caution => {
+                println!(
+                    "{}",
+                    "⚠ This command modifies files or processes."
+                        .bold()
+                        .yellow()
+                );
+                if confirm_yes("Are you sure? (y/n): ") {
+                    execute_command(cmd);
+                }
+            }
 
-        if confirm.trim().eq_ignore_ascii_case("y") {
-            execute_command(cmd);
-        } else {
-            println!("{}", "Command cancelled.".dimmed());
+            CommandRisk::Dangerous => {
+                println!("{}", "🔥 DANGEROUS COMMAND DETECTED!".bold().red());
+                println!("{}", "To confirm, type the FULL command again:".bold());
+
+                let mut typed = String::new();
+                io::stdin().read_line(&mut typed).unwrap();
+
+                if typed.trim() == cmd {
+                    execute_command(cmd);
+                } else {
+                    println!("{}", "Command cancelled.".bold().yellow());
+                }
+            }
         }
     } else {
         println!("{} {}", "Invalid AI reply:".bold().red(), reply.dimmed());
@@ -104,27 +132,56 @@ fn handle_ai_reply(reply: &str) {
 }
 
 /// Execute shell command safely (non-blocking)
-fn execute_command(cmd: &str) {
+fn execute_command(cmd: &str) -> CommandResult {
     println!("{} {}", "Executing:".bold().green(), cmd.bright_white());
 
-    let result = Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn();
+    let output = Command::new("sh").arg("-c").arg(cmd).output();
 
-    match result {
-        Ok(_) => {
-            println!("{}", "✔ Command started successfully.\n".dimmed());
+    match output {
+        Ok(out) => {
+            let exit_code = out.status.code().unwrap_or(-1);
+
+            let stdout = String::from_utf8_lossy(&out.stdout)
+                .chars()
+                .take(800)
+                .collect::<String>();
+
+            let stderr_raw = String::from_utf8_lossy(&out.stderr).to_string();
+
+            let stderr = if stderr_raw.trim().is_empty() {
+                "(no stderr output)".to_string()
+            } else {
+                stderr_raw.chars().take(800).collect()
+            };
+
+            let success = out.status.success();
+
+            if success {
+                println!("{}", "✔ Command succeeded".green().bold());
+            } else {
+                println!(
+                    "{} exit code {}",
+                    "✖ Command failed".red().bold(),
+                    exit_code
+                );
+            }
+
+            CommandResult {
+                success,
+                exit_code,
+                stdout,
+                stderr,
+            }
         }
         Err(e) => {
-            println!(
-                "{} {}",
-                "✖ Failed to execute command:".bold().red(),
-                e.to_string()
-            );
+            println!("{} {}", "✖ Failed to execute command:".bold().red(), e);
+
+            CommandResult {
+                success: false,
+                exit_code: -1,
+                stdout: "".into(),
+                stderr: e.to_string(),
+            }
         }
     }
 }
