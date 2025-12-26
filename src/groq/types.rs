@@ -6,9 +6,9 @@ pub struct Message {
     pub content: String,
 }
 
-#[derive(Debug)]
-pub enum CommandRisk {
-    Safe,
-    Caution,
-    Dangerous,
-}
+// #[derive(Debug)]
+// pub enum CommandRisk {
+//     Safe,
+//     Caution,
+//     Dangerous,
+// }
