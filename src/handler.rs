@@ -91,6 +91,14 @@ pub async fn handle_reply(
 
     let result = cmd::execute_and_capture(&cmd, current_dir);
     println!("{}", result.user_view);
+    if let Some(fix) = &result.suggestion {
+        println!(
+            "{} Did you mean:\n{} {}",
+            "AI:".bold().green(),
+            "Proposed command:".bold().yellow(),
+            fix.cyan()
+        );
+    }
 
     history.push(Message {
         role: "assistant".into(),
