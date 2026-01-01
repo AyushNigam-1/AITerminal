@@ -1,4 +1,5 @@
 use crate::cmd;
+use crate::groq::GroqClient;
 use crate::groq::Message;
 use colored::*;
 use std::{
@@ -11,6 +12,7 @@ pub async fn handle_reply(
     history: &mut Vec<Message>,
     current_dir: &mut PathBuf,
     has_display: bool,
+    groq_client: &GroqClient, // 👈 ADD THIS
 ) -> bool {
     let mut msg = String::new();
     let mut cmd = String::new();
@@ -99,7 +101,30 @@ pub async fn handle_reply(
             fix.cyan()
         );
     }
+    if let Some(image_path) = &result.created_file {
+        println!("{} Analyzing captured screenshot...", "AI:".bold().green());
 
+        match groq_client
+            .analyze_image_file(
+                image_path.to_str().unwrap(),
+                "Analyze this screenshot and explain what it shows.",
+            )
+            .await
+        {
+            Ok(analysis) => {
+                println!("{} {}", "Image analysis:".bold().cyan(), analysis);
+
+                // Feed analysis back into history
+                history.push(Message {
+                    role: "assistant".into(),
+                    content: format!("IMAGE_ANALYSIS:\n{}", analysis),
+                });
+            }
+            Err(err) => {
+                println!("{} {}", "Image analysis failed:".red(), err);
+            }
+        }
+    }
     history.push(Message {
         role: "assistant".into(),
         content: reply.to_string(),

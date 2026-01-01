@@ -11,7 +11,8 @@ pub struct CommandResult {
     pub exit_code: i32,
     pub user_view: String,
     pub ai_view: String,
-    pub suggestion: Option<String>, // 👈 NEW FEATURE OUTPUT
+    pub suggestion: Option<String>,    // 👈 NEW FEATURE OUTPUT
+    pub created_file: Option<PathBuf>, // 👈 ADD THIS
 }
 
 pub fn execute_and_capture(cmd: &str, dir: &PathBuf) -> CommandResult {
@@ -27,9 +28,21 @@ pub fn execute_and_capture(cmd: &str, dir: &PathBuf) -> CommandResult {
             let stdout = truncate(&String::from_utf8_lossy(&out.stdout));
             let stderr = truncate(&String::from_utf8_lossy(&out.stderr));
 
-            // 🔍 NEW: attempt typo fix only on failure
+            // 🔍 Typo fix (existing feature)
             let suggestion = if code != 0 {
                 suggest_fix(cmd, &stderr, dir)
+            } else {
+                None
+            };
+
+            // 🖼️ NEW: detect screenshot creation
+            let created_file = if code == 0 && is_screenshot_command(cmd) {
+                let candidates = ["screenshot.png", "Screenshot.png", "screen.png"];
+
+                candidates
+                    .iter()
+                    .map(|name| dir.join(name))
+                    .find(|path| path.exists())
             } else {
                 None
             };
@@ -50,6 +63,7 @@ pub fn execute_and_capture(cmd: &str, dir: &PathBuf) -> CommandResult {
                 user_view,
                 ai_view,
                 suggestion,
+                created_file, // 👈 ADD THIS
             }
         }
 
@@ -58,6 +72,7 @@ pub fn execute_and_capture(cmd: &str, dir: &PathBuf) -> CommandResult {
             user_view: format!("{} {}", "✖ Error:".red().bold(), e),
             ai_view: e.to_string(),
             suggestion: None,
+            created_file: None, // 👈 ADD THIS
         },
     }
 }

@@ -91,8 +91,14 @@ async fn main() {
             };
             print!("\r\x1b[K");
 
-            let should_continue =
-                handler::handle_reply(&reply, &mut history, &mut current_dir, has_display).await;
+            let should_continue = handler::handle_reply(
+                &reply,
+                &mut history,
+                &mut current_dir,
+                has_display,
+                &groq_client,
+            )
+            .await;
 
             if !should_continue {
                 break;
