@@ -1,6 +1,9 @@
 use base64::{Engine as _, engine::general_purpose};
-use reqwest::Client;
+use reqwest::{Client, multipart};
+use std::time::Duration;
 use thiserror::Error;
+use tokio::fs::File;
+use tokio_util::codec::{BytesCodec, FramedRead};
 
 use super::types::Message;
 
@@ -24,7 +27,10 @@ pub struct GroqClient {
 impl GroqClient {
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
-            http: Client::new(),
+            http: Client::builder()
+                .timeout(Duration::from_secs(30)) // 30s timeout prevents infinite hangs
+                .build()
+                .unwrap_or_default(),
             api_key: api_key.into(),
             model: model.into(),
         }
@@ -115,5 +121,40 @@ impl GroqClient {
             .to_string();
 
         Ok(answer)
+    }
+
+    pub async fn transcribe_audio(&self, file_path: &str) -> Result<String, GroqError> {
+        // 1. Prepare File Upload
+        let file = File::open(file_path)
+            .await
+            .map_err(|e| GroqError::Api(format!("File not found: {}", e)))?;
+
+        let stream = FramedRead::new(file, BytesCodec::new());
+        let file_part = multipart::Part::stream(reqwest::Body::wrap_stream(stream))
+            .file_name("recording.wav")
+            .mime_str("audio/wav")
+            .unwrap();
+
+        // 2. Build Form
+        let form = multipart::Form::new()
+            .part("file", file_part)
+            .text("model", "whisper-large-v3-turbo") // Optimized for speed
+            .text("response_format", "json");
+
+        // 3. Send Request to Transcription Endpoint
+        let res = self
+            .http
+            .post("https://api.groq.com/openai/v1/audio/transcriptions")
+            .bearer_auth(&self.api_key)
+            .multipart(form)
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            return Err(GroqError::Api(res.text().await?));
+        }
+
+        let json: serde_json::Value = res.json().await?;
+        Ok(json["text"].as_str().unwrap_or("").to_string())
     }
 }
